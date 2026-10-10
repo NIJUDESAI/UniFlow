@@ -1,0 +1,23 @@
+[
+  {
+    "id": 1,
+    "title": "Complete DSA practice",
+    "subject": "Data Structures",
+    "time": "10:30 AM",
+    "done": true
+  },
+  {
+    "id": 2,
+    "title": "Revise database concepts",
+    "subject": "Database Management",
+    "time": "1:00 PM",
+    "done": false
+  },
+  {
+    "id": 3,
+    "title": "Prepare web development lab",
+    "subject": "Web Development",
+    "time": "4:00 PM",
+    "done": false
+  }
+]
