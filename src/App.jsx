@@ -15,8 +15,17 @@ import {
   TrendingUp,
   GraduationCap,
   Menu,
-  X
+  X,
+  Loader2,
+  AlertCircle,
+  RefreshCw
 } from 'lucide-react'
+import {
+  fetchTasks,
+  createTask as apiCreateTask,
+  updateTask as apiUpdateTask,
+  checkBackendHealth
+} from './api/taskApi.js'
 import './App.css'
 
 const DEFAULT_TASKS = [
@@ -43,7 +52,7 @@ function App() {
       const savedTasks = localStorage.getItem('uniflow_tasks')
       if (savedTasks) {
         const parsed = JSON.parse(savedTasks)
-        if (Array.isArray(parsed)) {
+        if (Array.isArray(parsed) && parsed.length > 0) {
           return parsed
         }
       }
@@ -53,7 +62,12 @@ function App() {
     return DEFAULT_TASKS
   })
 
-  // Persist tasks in browser localStorage whenever tasks state changes
+  const [tasksLoading, setTasksLoading] = useState(true)
+  const [tasksError, setTasksError] = useState(null)
+  const [submittingTask, setSubmittingTask] = useState(false)
+  const [taskFormError, setTaskFormError] = useState(null)
+
+  // Persist tasks in browser localStorage as offline backup
   useEffect(() => {
     try {
       localStorage.setItem('uniflow_tasks', JSON.stringify(tasks))
@@ -62,17 +76,34 @@ function App() {
     }
   }, [tasks])
 
+  // Load tasks from backend when the page opens
+  const loadTasks = async () => {
+    setTasksLoading(true)
+    setTasksError(null)
+    try {
+      const data = await fetchTasks()
+      if (Array.isArray(data)) {
+        setTasks(data)
+      }
+    } catch (error) {
+      console.error('Failed to load tasks from backend:', error)
+      setTasksError(error.message || 'Failed to load tasks from backend.')
+    } finally {
+      setTasksLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    loadTasks()
+  }, [])
+
   const [backendStatus, setBackendStatus] = useState('checking') // 'checking' | 'connected' | 'disconnected'
 
   const checkBackendConnection = async () => {
     setBackendStatus('checking')
     try {
-      const response = await fetch('http://localhost:5000/api/health')
-      if (response.ok) {
-        setBackendStatus('connected')
-      } else {
-        setBackendStatus('disconnected')
-      }
+      await checkBackendHealth()
+      setBackendStatus('connected')
     } catch (error) {
       console.warn('Backend connection check failed:', error)
       setBackendStatus('disconnected')
@@ -94,12 +125,36 @@ function App() {
   const safeCompletedTasks = Math.min(completedTasks, totalTasks)
   const completionPercentage = totalTasks > 0 ? Math.min(100, Math.round((safeCompletedTasks / totalTasks) * 100)) : 0
 
-  const toggleTask = (taskId) => {
+  const toggleTask = async (taskId) => {
+    const currentTask = tasks.find((t) => t.id === taskId)
+    if (!currentTask) return
+
+    const nextDone = !currentTask.done
+
+    // Optimistic UI update
     setTasks((prevTasks) =>
       prevTasks.map((task) =>
-        task.id === taskId ? { ...task, done: !task.done } : task
+        task.id === taskId ? { ...task, done: nextDone } : task
       )
     )
+
+    try {
+      const updated = await apiUpdateTask(taskId, { done: nextDone })
+      setTasks((prevTasks) =>
+        prevTasks.map((task) =>
+          task.id === taskId ? { ...task, done: updated.done } : task
+        )
+      )
+    } catch (error) {
+      console.error(`Failed to update task ${taskId}:`, error)
+      // Revert optimistic update on failure
+      setTasks((prevTasks) =>
+        prevTasks.map((task) =>
+          task.id === taskId ? { ...task, done: currentTask.done } : task
+        )
+      )
+      setTasksError(`Failed to update task: ${error.message}`)
+    }
   }
 
   const openModal = () => {
@@ -107,6 +162,7 @@ function App() {
     setTaskSubject('')
     setTaskTime('')
     setTitleError('')
+    setTaskFormError(null)
     setIsModalOpen(true)
   }
 
@@ -116,9 +172,10 @@ function App() {
     setTaskSubject('')
     setTaskTime('')
     setTitleError('')
+    setTaskFormError(null)
   }
 
-  const handleAddTask = (e) => {
+  const handleAddTask = async (e) => {
     e.preventDefault()
 
     const trimmedTitle = taskTitle.trim()
@@ -127,16 +184,27 @@ function App() {
       return
     }
 
-    const newTask = {
-      id: Date.now(),
+    setSubmittingTask(true)
+    setTaskFormError(null)
+
+    const payload = {
       title: trimmedTitle,
       subject: taskSubject.trim() || 'General',
       time: taskTime.trim() || 'Today',
       done: false
     }
 
-    setTasks((prevTasks) => [...prevTasks, newTask])
-    closeModal()
+    try {
+      const newTask = await apiCreateTask(payload)
+      setTasks((prevTasks) => [...prevTasks, newTask])
+      closeModal()
+      setTasksError(null)
+    } catch (error) {
+      console.error('Failed to create task:', error)
+      setTaskFormError(error.message || 'Failed to save task to backend.')
+    } finally {
+      setSubmittingTask(false)
+    }
   }
 
   useEffect(() => {
@@ -297,24 +365,50 @@ function App() {
                 <div><h2>Today's tasks</h2><p>Keep your momentum going.</p></div>
                 <button className="text-button" onClick={() => setActivePage('Assignments')}>View all <span>→</span></button>
               </div>
-              <div className="task-list">
-                {tasks.map((task) => (
-                  <div className="task-row" key={task.id}>
-                    <button
-                      type="button"
-                      className={`task-check ${task.done ? 'task-done' : ''}`}
-                      onClick={() => toggleTask(task.id)}
-                      aria-label={`Mark "${task.title}" as ${task.done ? 'incomplete' : 'complete'}`}
-                      role="checkbox"
-                      aria-checked={task.done}
-                    >
-                      {task.done && <CheckCircle2 size={17} />}
-                    </button>
-                    <div className="task-details"><strong>{task.title}</strong><span>{task.subject}</span></div>
-                    <span className="task-time"><Clock size={14} /> {task.time}</span>
+
+              {tasksError && (
+                <div className="tasks-error-banner" role="alert">
+                  <div className="tasks-error-text">
+                    <AlertCircle size={15} />
+                    <span>{tasksError}</span>
                   </div>
-                ))}
-              </div>
+                  <button type="button" className="retry-tasks-btn" onClick={loadTasks}>
+                    <RefreshCw size={11} /> Retry
+                  </button>
+                </div>
+              )}
+
+              {tasksLoading ? (
+                <div className="tasks-status-message">
+                  <Loader2 size={18} className="spin-icon" />
+                  <span>Loading tasks...</span>
+                </div>
+              ) : tasks.length === 0 ? (
+                <div className="tasks-empty-message">
+                  <ClipboardCheck size={24} />
+                  <p>No tasks scheduled for today. Add one below!</p>
+                </div>
+              ) : (
+                <div className="task-list">
+                  {tasks.map((task) => (
+                    <div className="task-row" key={task.id}>
+                      <button
+                        type="button"
+                        className={`task-check ${task.done ? 'task-done' : ''}`}
+                        onClick={() => toggleTask(task.id)}
+                        aria-label={`Mark "${task.title}" as ${task.done ? 'incomplete' : 'complete'}`}
+                        role="checkbox"
+                        aria-checked={task.done}
+                      >
+                        {task.done && <CheckCircle2 size={17} />}
+                      </button>
+                      <div className="task-details"><strong>{task.title}</strong><span>{task.subject}</span></div>
+                      <span className="task-time"><Clock size={14} /> {task.time}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
               <button className="add-task-button" onClick={openModal}>+ Add new task</button>
             </div>
 
@@ -392,6 +486,13 @@ function App() {
             </div>
 
             <form onSubmit={handleAddTask} className="task-form">
+              {taskFormError && (
+                <div className="form-alert-error" role="alert">
+                  <AlertCircle size={15} />
+                  <span>{taskFormError}</span>
+                </div>
+              )}
+
               <div className="form-group">
                 <label htmlFor="task-title">
                   Task Title <span className="required">*</span>
@@ -402,9 +503,11 @@ function App() {
                   className={`form-input ${titleError ? 'input-error' : ''}`}
                   placeholder="e.g. Complete DSA practice"
                   value={taskTitle}
+                  disabled={submittingTask}
                   onChange={(e) => {
                     setTaskTitle(e.target.value)
                     if (titleError) setTitleError('')
+                    if (taskFormError) setTaskFormError(null)
                   }}
                   autoFocus
                 />
@@ -419,6 +522,7 @@ function App() {
                   className="form-input"
                   placeholder="e.g. Data Structures"
                   value={taskSubject}
+                  disabled={submittingTask}
                   onChange={(e) => setTaskSubject(e.target.value)}
                 />
               </div>
@@ -431,6 +535,7 @@ function App() {
                   className="form-input"
                   placeholder="e.g. 5:00 PM"
                   value={taskTime}
+                  disabled={submittingTask}
                   onChange={(e) => setTaskTime(e.target.value)}
                 />
               </div>
@@ -440,11 +545,22 @@ function App() {
                   type="button"
                   className="btn-cancel"
                   onClick={closeModal}
+                  disabled={submittingTask}
                 >
                   Cancel
                 </button>
-                <button type="submit" className="btn-submit">
-                  Add Task
+                <button
+                  type="submit"
+                  className="btn-submit"
+                  disabled={submittingTask}
+                >
+                  {submittingTask ? (
+                    <span className="btn-spinner">
+                      <Loader2 size={15} className="spin-icon" /> Adding...
+                    </span>
+                  ) : (
+                    'Add Task'
+                  )}
                 </button>
               </div>
             </form>

@@ -1259,3 +1259,118 @@ input:focus-visible {
     text-align: center;
   }
 }
+
+/* Task API Loading and Error States */
+.spin-icon {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.tasks-status-message {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 28px 12px;
+  color: #705cdd;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.tasks-error-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 14px;
+  background: #fff5f5;
+  border: 1px solid #fed7d7;
+  border-radius: 8px;
+  margin-bottom: 12px;
+}
+
+.tasks-error-text {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #c53030;
+  font-size: 11px;
+  font-weight: 500;
+  min-width: 0;
+}
+
+.tasks-error-text span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.retry-tasks-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #ffffff;
+  border: 1px solid #fed7d7;
+  color: #c53030;
+  border-radius: 6px;
+  padding: 4px 9px;
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.retry-tasks-btn:hover {
+  background: #fff0f0;
+  border-color: #feb2b2;
+}
+
+.tasks-empty-message {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 28px 12px;
+  color: #9897aa;
+  font-size: 11px;
+  text-align: center;
+}
+
+.tasks-empty-message p {
+  margin: 0;
+}
+
+.form-alert-error {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 12px;
+  background: #fff5f5;
+  border: 1px solid #fed7d7;
+  border-radius: 8px;
+  color: #c53030;
+  font-size: 11px;
+  font-weight: 500;
+  margin-bottom: 14px;
+}
+
+.btn-submit:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.btn-spinner {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
