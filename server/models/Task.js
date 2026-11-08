@@ -2,11 +2,15 @@ import mongoose from 'mongoose'
 
 const taskSchema = new mongoose.Schema(
   {
+    userId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: true,
+      index: true
+    },
     id: {
       type: Number,
-      required: true,
-      unique: true,
-      index: true
+      required: true
     },
     title: {
       type: String,
@@ -40,6 +44,9 @@ const taskSchema = new mongoose.Schema(
     }
   }
 )
+
+// Compound unique index ensuring each user has their own unique task ID sequence
+taskSchema.index({ userId: 1, id: 1 }, { unique: true })
 
 export const Task = mongoose.models.Task || mongoose.model('Task', taskSchema)
 export default Task

@@ -9,7 +9,6 @@ import {
   Settings,
   Bell,
   Search,
-  ChevronDown,
   Clock,
   CheckCircle2,
   TrendingUp,
@@ -18,23 +17,38 @@ import {
   X,
   Loader2,
   AlertCircle,
-  RefreshCw
+  RefreshCw,
+  LogOut
 } from 'lucide-react'
+import { useAuth } from './context/AuthContext.jsx'
+import AuthView from './components/AuthView.jsx'
 import {
   fetchTasks,
   createTask as apiCreateTask,
   updateTask as apiUpdateTask,
+  deleteTask as apiDeleteTask, // eslint-disable-line no-unused-vars
   checkBackendHealth
 } from './api/taskApi.js'
 import './App.css'
 
-const DEFAULT_TASKS = [
-  { id: 1, title: 'Complete DSA practice', subject: 'Data Structures', time: '10:30 AM', done: true },
-  { id: 2, title: 'Revise database concepts', subject: 'Database Management', time: '1:00 PM', done: false },
-  { id: 3, title: 'Prepare web development lab', subject: 'Web Development', time: '4:00 PM', done: false }
-]
+/**
+ * Extracts initials from the student's full name.
+ * e.g., "Alex Johnson" -> "AJ", "Alex" -> "AL"
+ */
+function getInitials(name) {
+  if (!name || typeof name !== 'string') return 'ST'
+  const parts = name.trim().split(/\s+/)
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase()
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+}
 
-function App() {
+/**
+ * Authenticated Student Dashboard.
+ * Rendered when the student has an active verified session.
+ */
+function Dashboard() {
+  const { user, token, logout } = useAuth()
+
   const [activePage, setActivePage] = useState('Dashboard')
   const [menuOpen, setMenuOpen] = useState(false)
 
@@ -47,45 +61,30 @@ function App() {
     { name: 'Career', icon: BriefcaseBusiness }
   ]
 
-  const [tasks, setTasks] = useState(() => {
-    try {
-      const savedTasks = localStorage.getItem('uniflow_tasks')
-      if (savedTasks) {
-        const parsed = JSON.parse(savedTasks)
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed
-        }
-      }
-    } catch (error) {
-      console.error('Failed to load tasks from localStorage:', error)
-    }
-    return DEFAULT_TASKS
-  })
-
+  // Tasks are initialized as empty and sourced strictly from the backend
+  const [tasks, setTasks] = useState([])
   const [tasksLoading, setTasksLoading] = useState(true)
   const [tasksError, setTasksError] = useState(null)
   const [submittingTask, setSubmittingTask] = useState(false)
   const [taskFormError, setTaskFormError] = useState(null)
 
-  // Persist tasks in browser localStorage as offline backup
-  useEffect(() => {
-    try {
-      localStorage.setItem('uniflow_tasks', JSON.stringify(tasks))
-    } catch (error) {
-      console.error('Failed to save tasks to localStorage:', error)
-    }
-  }, [tasks])
-
-  // Load tasks from backend when the page opens
+  // Load tasks belonging to the authenticated student
   const loadTasks = async () => {
+    if (!token) return
+
     setTasksLoading(true)
     setTasksError(null)
+
     try {
-      const data = await fetchTasks()
+      const data = await fetchTasks(token)
       if (Array.isArray(data)) {
         setTasks(data)
       }
     } catch (error) {
+      if (error?.status === 401 || error?.status === 403) {
+        logout()
+        return
+      }
       console.error('Failed to load tasks from backend:', error)
       setTasksError(error.message || 'Failed to load tasks from backend.')
     } finally {
@@ -94,9 +93,13 @@ function App() {
   }
 
   useEffect(() => {
-    loadTasks()
-  }, [])
+    if (token) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      loadTasks()
+    }
+  }, [token]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Backend connection status checking
   const [backendStatus, setBackendStatus] = useState('checking') // 'checking' | 'connected' | 'disconnected'
 
   const checkBackendConnection = async () => {
@@ -111,9 +114,11 @@ function App() {
   }
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     checkBackendConnection()
   }, [])
 
+  // Modal and task form state
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [taskTitle, setTaskTitle] = useState('')
   const [taskSubject, setTaskSubject] = useState('')
@@ -123,11 +128,13 @@ function App() {
   const totalTasks = tasks.length
   const completedTasks = tasks.filter((task) => task.done).length
   const safeCompletedTasks = Math.min(completedTasks, totalTasks)
-  const completionPercentage = totalTasks > 0 ? Math.min(100, Math.round((safeCompletedTasks / totalTasks) * 100)) : 0
+  const completionPercentage =
+    totalTasks > 0 ? Math.min(100, Math.round((safeCompletedTasks / totalTasks) * 100)) : 0
 
+  // Toggle task completion status
   const toggleTask = async (taskId) => {
     const currentTask = tasks.find((t) => t.id === taskId)
-    if (!currentTask) return
+    if (!currentTask || !token) return
 
     const nextDone = !currentTask.done
 
@@ -139,13 +146,17 @@ function App() {
     )
 
     try {
-      const updated = await apiUpdateTask(taskId, { done: nextDone })
+      const updated = await apiUpdateTask(taskId, { done: nextDone }, token)
       setTasks((prevTasks) =>
         prevTasks.map((task) =>
           task.id === taskId ? { ...task, done: updated.done } : task
         )
       )
     } catch (error) {
+      if (error?.status === 401 || error?.status === 403) {
+        logout()
+        return
+      }
       console.error(`Failed to update task ${taskId}:`, error)
       // Revert optimistic update on failure
       setTasks((prevTasks) =>
@@ -175,12 +186,18 @@ function App() {
     setTaskFormError(null)
   }
 
+  // Handle creating a new task
   const handleAddTask = async (e) => {
     e.preventDefault()
 
     const trimmedTitle = taskTitle.trim()
     if (!trimmedTitle) {
       setTitleError('Task title is required.')
+      return
+    }
+
+    if (!token) {
+      setTaskFormError('Authentication session expired. Please log in again.')
       return
     }
 
@@ -195,11 +212,16 @@ function App() {
     }
 
     try {
-      const newTask = await apiCreateTask(payload)
+      const newTask = await apiCreateTask(payload, token)
       setTasks((prevTasks) => [...prevTasks, newTask])
       closeModal()
       setTasksError(null)
     } catch (error) {
+      if (error?.status === 401 || error?.status === 403) {
+        closeModal()
+        logout()
+        return
+      }
       console.error('Failed to create task:', error)
       setTaskFormError(error.message || 'Failed to save task to backend.')
     } finally {
@@ -207,6 +229,7 @@ function App() {
     }
   }
 
+  // Close modal with Escape key
   useEffect(() => {
     const handleKeyDown = (e) => {
       if (e.key === 'Escape' && isModalOpen) {
@@ -216,6 +239,9 @@ function App() {
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [isModalOpen])
+
+  const studentInitials = getInitials(user?.name)
+  const studentFirstName = user?.name ? user.name.trim().split(' ')[0] : 'there'
 
   return (
     <div className="app">
@@ -260,18 +286,56 @@ function App() {
             <Settings size={19} />
             <span>Settings</span>
           </button>
+
+          {/* Authenticated Student Profile Card with Logout */}
           <div className="profile">
-            <div className="avatar">ND</div>
-            <div className="profile-info">
-              <strong>My Workspace</strong>
-              <span>Student account</span>
+            <div className="avatar" title={user?.name || 'Student'}>
+              {studentInitials}
             </div>
-            <ChevronDown size={17} />
+            <div className="profile-info">
+              <strong>{user?.name || 'Student'}</strong>
+              <span title={user?.email || ''}>{user?.email || 'Student account'}</span>
+            </div>
+            <button
+              type="button"
+              className="profile-logout-btn"
+              onClick={logout}
+              title="Log out of your workspace"
+              aria-label="Log out"
+              style={{
+                background: 'none',
+                border: 'none',
+                padding: '6px',
+                color: '#9292a6',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderRadius: '6px',
+                transition: 'color 0.15s, background 0.15s'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.color = '#c53030'
+                e.currentTarget.style.background = '#fff5f5'
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.color = '#9292a6'
+                e.currentTarget.style.background = 'none'
+              }}
+            >
+              <LogOut size={17} />
+            </button>
           </div>
         </div>
       </aside>
 
-      {menuOpen && <button className="mobile-overlay" onClick={() => setMenuOpen(false)} aria-label="Close navigation" />}
+      {menuOpen && (
+        <button
+          className="mobile-overlay"
+          onClick={() => setMenuOpen(false)}
+          aria-label="Close navigation"
+        />
+      )}
 
       <main className="main-content">
         <header className="topbar">
@@ -289,7 +353,21 @@ function App() {
               <Bell size={19} />
               <span />
             </button>
-            <div className="top-avatar">ND</div>
+            <div className="topbar-profile">
+              <div className="top-avatar" title={user?.name || 'Student'}>
+                {studentInitials}
+              </div>
+              <button
+                type="button"
+                className="topbar-logout-btn"
+                onClick={logout}
+                title="Log out of your workspace"
+                aria-label="Log out"
+              >
+                <LogOut size={14} />
+                <span>Logout</span>
+              </button>
+            </div>
           </div>
         </header>
 
@@ -297,7 +375,11 @@ function App() {
           <section className="welcome-row">
             <div>
               <p className="eyebrow">YOUR STUDENT WORKSPACE</p>
-              <h1>{activePage === 'Dashboard' ? 'Good morning!' : activePage}</h1>
+              <h1>
+                {activePage === 'Dashboard'
+                  ? `Good morning, ${studentFirstName}!`
+                  : activePage}
+              </h1>
               <p className="welcome-subtitle">
                 {activePage === 'Dashboard'
                   ? "Ready to make today count? Here's your overview."
@@ -314,8 +396,8 @@ function App() {
                   backendStatus === 'connected'
                     ? 'Backend Connected'
                     : backendStatus === 'disconnected'
-                    ? 'Backend Disconnected'
-                    : 'Checking connection...'
+                      ? 'Backend Disconnected'
+                      : 'Checking connection...'
                 }`}
               >
                 <span className="status-dot" />
@@ -456,6 +538,7 @@ function App() {
         </div>
       </main>
 
+      {/* Task Creation Modal */}
       {isModalOpen && (
         <div
           className="task-modal-backdrop"
@@ -569,6 +652,46 @@ function App() {
       )}
     </div>
   )
+}
+
+/**
+ * Root App component.
+ * Manages screen routing between Loading, AuthView, and Authenticated Dashboard.
+ */
+function App() {
+  const { isAuthenticated, isLoading } = useAuth()
+
+  // Full-page loading screen while verifying stored session token
+  if (isLoading) {
+    return (
+      <div
+        style={{
+          minHeight: '100vh',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: '14px',
+          background: '#f7f8fc',
+          color: '#7663e9',
+          fontFamily: "'DM Sans', sans-serif"
+        }}
+      >
+        <Loader2 size={36} className="spin-icon" />
+        <p style={{ margin: 0, fontSize: '14px', fontWeight: 600, color: '#4a4968' }}>
+          Loading your workspace...
+        </p>
+      </div>
+    )
+  }
+
+  // Display authentication view when unauthenticated
+  if (!isAuthenticated) {
+    return <AuthView />
+  }
+
+  // Render dashboard when authenticated
+  return <Dashboard />
 }
 
 export default App

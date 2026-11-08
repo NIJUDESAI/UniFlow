@@ -6,6 +6,7 @@ import dotenv from 'dotenv'
 import { connectDB, getDbStatus } from './db.js'
 import { seedTasksToMongoIfEmpty } from './storage/taskStorage.js'
 import taskRoutes from './routes/tasks.js'
+import authRoutes from './routes/auth.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -27,7 +28,7 @@ app.use(cors({
   origin: ['http://localhost:5173', 'http://localhost:5174']
 }))
 
-// Middleware to parse incoming JSON bodies
+// Middleware to parse incoming JSON bodies (must be before route handlers)
 app.use(express.json())
 
 // Health check endpoint reporting server and MongoDB connection status
@@ -42,6 +43,9 @@ app.get('/api/health', (req, res) => {
     mongodb: dbStatus
   })
 })
+
+// Authentication API routes
+app.use('/api/auth', authRoutes)
 
 // Task API routes
 app.use('/api/tasks', taskRoutes)
